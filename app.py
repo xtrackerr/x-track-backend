@@ -1,17 +1,18 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
-from twikit import Client
 import asyncio
 
 app = Flask(__name__)
 CORS(app)
 
-async def get_tweets_async(username, limit=10):
+async def fetch_tweets(username, limit=10):
     try:
-        # Create client – guest authentication happens automatically
+        from twikit import Client
+        
+        # Initialize client - NO PROXY ARGUMENTS
         client = Client('en-US')
         
-        # Get user by screen name
+        # Get user
         user = await client.get_user_by_screen_name(username)
         
         # Get tweets
@@ -35,8 +36,7 @@ async def get_tweets_async(username, limit=10):
 
 @app.route('/tweets/<username>')
 def get_tweets(username):
-    # Use asyncio.run() – simple and works in Flask
-    return jsonify(asyncio.run(get_tweets_async(username)))
+    return jsonify(asyncio.run(fetch_tweets(username)))
 
 @app.route('/')
 def home():
