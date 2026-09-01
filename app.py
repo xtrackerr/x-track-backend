@@ -1,18 +1,14 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
+from twikit import Client
 import asyncio
-import nest_asyncio
-
-nest_asyncio.apply()
 
 app = Flask(__name__)
 CORS(app)
 
-async def fetch_tweets_async(username, limit=10):
+async def get_tweets_async(username, limit=10):
     try:
-        from twikit import Client
-        
-        # Create client with language
+        # Create client – guest authentication happens automatically
         client = Client('en-US')
         
         # Get user by screen name
@@ -32,35 +28,15 @@ async def fetch_tweets_async(username, limit=10):
                 'likes': tweet.favorite_count,
                 'retweets': tweet.retweet_count
             })
-        
         return result
         
     except Exception as e:
-        return [{'error': f'Error: {str(e)}'}]
-
-def fetch_tweets_sync(username, limit=10):
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # Create a new loop if one is already running
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            result = new_loop.run_until_complete(fetch_tweets_async(username, limit))
-            new_loop.close()
-            return result
-        else:
-            return loop.run_until_complete(fetch_tweets_async(username, limit))
-    except RuntimeError:
-        # Fallback to creating a new loop
-        new_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(new_loop)
-        result = new_loop.run_until_complete(fetch_tweets_async(username, limit))
-        new_loop.close()
-        return result
+        return [{'error': str(e)}]
 
 @app.route('/tweets/<username>')
 def get_tweets(username):
-    return jsonify(fetch_tweets_sync(username))
+    # Use asyncio.run() – simple and works in Flask
+    return jsonify(asyncio.run(get_tweets_async(username)))
 
 @app.route('/')
 def home():
