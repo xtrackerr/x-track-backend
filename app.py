@@ -1,22 +1,26 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
 import asyncio
+import os
 
 app = Flask(__name__)
 CORS(app)
 
-# YOUR X ACCOUNT CREDENTIALS (hardcoded)
-X_USERNAME = "albertellis01"
-X_PASSWORD = "w4UEyib!S7gHH-D"
+# Read credentials from environment variables
+X_USERNAME = os.environ.get('X_USERNAME')
+X_PASSWORD = os.environ.get('X_PASSWORD')
 
 async def fetch_tweets(username, limit=10):
     try:
         from twikit import Client
         
-        # Create client
+        if not X_USERNAME or not X_PASSWORD:
+            return [{'error': 'Missing X credentials on server'}]
+        
+        # ✅ CORRECT: No 'proxies' argument
         client = Client('en-US')
         
-        # Login with YOUR credentials
+        # Login with credentials
         await client.login(
             auth_info_1=X_USERNAME,
             password=X_PASSWORD
