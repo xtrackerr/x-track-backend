@@ -1,6 +1,6 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
-from twikit import Client
+from twikit import Client  # twifork is a drop-in replacement
 import asyncio
 
 app = Flask(__name__)
@@ -8,16 +8,18 @@ CORS(app)
 
 async def fetch_tweets_async(username, limit=10):
     try:
-        # 1. Create a client and perform guest login
+        # 1. Create a client
         client = Client('en-US')
-        # This is the correct method for guest authentication
-        await client.login()  # ← No arguments for guest
 
-        # 2. Get user by screen name
+        # 2. The library handles guest authentication automatically.
+        #    You do not need to call a separate login or guest_auth method.
+        #    Simply making the first request (e.g., getting a user) will trigger it.
+
+        # 3. Get user by screen name
         user = await client.get_user_by_screen_name(username)
         user_id = user.id
 
-        # 3. Get tweets using the user's numeric ID
+        # 4. Get tweets using the user's numeric ID
         tweets = await client.get_user_tweets(user_id, 'Tweets', count=limit)
 
         result = []
@@ -34,9 +36,11 @@ async def fetch_tweets_async(username, limit=10):
         return result
 
     except Exception as e:
+        # Return the error message as a JSON-friendly dict
         return [{'error': f'Error: {str(e)}'}]
 
 def fetch_tweets_sync(username, limit=10):
+    """Synchronous wrapper for the async function."""
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
