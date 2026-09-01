@@ -1,16 +1,15 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
 import requests
-import json
 import re
 
 app = Flask(__name__)
 CORS(app)
 
-# Your auth_token (hardcoded)
-AUTH_TOKEN = "8d5d2c87f31c36e910e98d98789d0a30a5c80cd9"
+# === USE YOUR FRESH AUTH_TOKEN HERE ===
+AUTH_TOKEN = "8d5d2c87f31c36e910e98d98789d0a30a5c80cd9"  # ← replace with fresh one if needed
 
-# Fixed guest token that works with X's current API
+# Standard bearer token (works for all)
 BEARER_TOKEN = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
 
 def fetch_tweets(username, limit=10):
@@ -25,61 +24,53 @@ def fetch_tweets(username, limit=10):
             'x-twitter-client-language': 'en'
         })
 
-        # Step 1: Get user ID
+        # Step 1: Get user info (REST endpoint)
         user_resp = session.get(
-            'https://x.com/i/api/graphql/-tV5-zb-lS3WDW34ppXrQg/UserByScreenName',
-            params={'variables': json.dumps({"screen_name": username})}
+            'https://x.com/i/api/1.1/users/show.json',
+            params={'screen_name': username},
+            timeout=10
         )
         if user_resp.status_code != 200:
-            return [{'error': f'User lookup failed: {user_resp.status_code}'}]
-        user_id = user_resp.json()['data']['user']['result']['id']
+            return [{'error': f'User lookup failed: {user_resp.status_code} - {user_resp.text}'}]
+        
+        user_data = user_resp.json()
+        user_id = user_data.get('id_str')
+        if not user_id:
+            return [{'error': 'User ID not found'}]
 
-        # Step 2: Get tweets
+        # Step 2: Get tweets (REST endpoint)
         tweets_resp = session.get(
-            'https://x.com/i/api/graphql/-tV5-zb-lS3WDW34ppXrQg/UserTweets',
-            params={'variables': json.dumps({
-                "userId": user_id,
-                "count": limit,
-                "includePromotedContent": False
-            })}
+            'https://x.com/i/api/1.1/statuses/user_timeline.json',
+            params={
+                'user_id': user_id,
+                'count': limit,
+                'tweet_mode': 'extended',
+                'include_rts': False
+            },
+            timeout=10
         )
         if tweets_resp.status_code != 200:
-            return [{'error': f'Tweet fetch failed: {tweets_resp.status_code}'}]
+            return [{'error': f'Tweet fetch failed: {tweets_resp.status_code} - {tweets_resp.text}'}]
 
-        data = tweets_resp.json()
+        tweets_data = tweets_resp.json()
+        if not tweets_data:
+            return [{'error': 'No tweets found'}]
+
         tweets = []
-        
-        try:
-            instructions = data['data']['user']['result']['timeline_v2']['timeline']['instructions']
-            for instruction in instructions:
-                if instruction.get('type') == 'TimelineAddEntries':
-                    for entry in instruction.get('entries', []):
-                        try:
-                            tweet_data = entry['content']['itemContent']['tweet_results']['result']
-                            if tweet_data.get('retweeted_status_result'):
-                                continue
-                            legacy = tweet_data.get('legacy', {})
-                            text = legacy.get('full_text', '')
-                            text = re.sub(r'https?://\S+', '', text).strip()
-                            tweets.append({
-                                'id': tweet_data.get('rest_id', ''),
-                                'text': text,
-                                'author_name': username,
-                                'author_username': username,
-                                'created_at': legacy.get('created_at', ''),
-                                'likes': legacy.get('favorite_count', 0),
-                                'retweets': legacy.get('retweet_count', 0)
-                            })
-                            if len(tweets) >= limit:
-                                break
-                        except:
-                            continue
-                if len(tweets) >= limit:
-                    break
-        except:
-            return [{'error': 'Failed to parse tweets'}]
+        for tweet in tweets_data:
+            text = tweet.get('full_text', tweet.get('text', ''))
+            text = re.sub(r'https?://\S+', '', text).strip()
+            tweets.append({
+                'id': tweet.get('id_str', ''),
+                'text': text,
+                'author_name': tweet.get('user', {}).get('name', username),
+                'author_username': tweet.get('user', {}).get('screen_name', username),
+                'created_at': tweet.get('created_at', ''),
+                'likes': tweet.get('favorite_count', 0),
+                'retweets': tweet.get('retweet_count', 0)
+            })
 
-        return tweets if tweets else [{'error': 'No tweets found'}]
+        return tweets
 
     except Exception as e:
         return [{'error': f'Error: {str(e)}'}]
@@ -90,7 +81,7 @@ def get_tweets(username):
 
 @app.route('/')
 def home():
-    return jsonify({'status': 'online', 'message': 'X Track Pro running'})
+    return jsonify({'status': 'online', 'message': 'X Track Pro using REST API'})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
