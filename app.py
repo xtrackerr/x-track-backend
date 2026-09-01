@@ -3,20 +3,48 @@ from flask_cors import CORS
 import subprocess
 import json
 import os
+import urllib.request
+import stat
+import platform
 
 app = Flask(__name__)
 CORS(app)
 
-def fetch_tweets(username, limit=10):
-    """Use x-tweet-fetcher CLI to get tweets."""
+def get_x_cli():
+    """Download x-cli binary if not present."""
+    bin_path = "/tmp/x-cli"
+    if os.path.exists(bin_path):
+        return bin_path
+    
+    # Detect OS/Arch
+    system = platform.system().lower()
+    arch = platform.machine().lower()
+    
+    if system != "linux":
+        return None
+    
+    if arch in ["x86_64", "amd64"]:
+        url = "https://github.com/tamnd/x-cli/releases/latest/download/x-linux-amd64"
+    elif arch in ["aarch64", "arm64"]:
+        url = "https://github.com/tamnd/x-cli/releases/latest/download/x-linux-arm64"
+    else:
+        return None
+    
     try:
-        # Run the xtf command
-        cmd = [
-            "xtf",
-            "--user", username,
-            "--limit", str(limit),
-            "--backend", "auto"  # Auto-fallback between backends
-        ]
+        urllib.request.urlretrieve(url, bin_path)
+        os.chmod(bin_path, os.stat(bin_path).st_mode | stat.S_IEXEC)
+        return bin_path
+    except:
+        return None
+
+def fetch_tweets(username, limit=10):
+    try:
+        x_bin = get_x_cli()
+        if not x_bin:
+            return [{'error': 'Unsupported platform'}]
+        
+        # Command: x-cli timeline username --guest -n limit
+        cmd = [x_bin, "timeline", username, "--guest", "-n", str(limit)]
         
         result = subprocess.run(
             cmd,
@@ -26,25 +54,31 @@ def fetch_tweets(username, limit=10):
         )
         
         if result.returncode != 0:
-            return [{'error': f'Command failed: {result.stderr}'}]
+            return [{'error': f'Failed: {result.stderr}'}]
         
-        # Parse the JSON output
-        tweets = json.loads(result.stdout)
+        # Parse JSONL output
+        tweets = []
+        for line in result.stdout.strip().split('\n'):
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                tweets.append({
+                    'id': data.get('id', ''),
+                    'text': data.get('text', ''),
+                    'author_name': data.get('author', {}).get('name', username),
+                    'author_username': data.get('author', {}).get('username', username),
+                    'created_at': data.get('created_at', ''),
+                    'likes': data.get('metrics', {}).get('likes', 0),
+                    'retweets': data.get('metrics', {}).get('retweets', 0)
+                })
+            except json.JSONDecodeError:
+                continue
         
-        # Format the response
-        formatted = []
-        for tweet in tweets:
-            formatted.append({
-                'id': tweet.get('id', ''),
-                'text': tweet.get('text', ''),
-                'author_name': tweet.get('author', {}).get('name', username),
-                'author_username': tweet.get('author', {}).get('username', username),
-                'created_at': tweet.get('created_at', ''),
-                'likes': tweet.get('metrics', {}).get('likes', 0),
-                'retweets': tweet.get('metrics', {}).get('retweets', 0)
-            })
+        if not tweets:
+            return [{'error': 'No tweets found'}]
         
-        return formatted
+        return tweets
         
     except subprocess.TimeoutExpired:
         return [{'error': 'Request timed out'}]
@@ -57,10 +91,7 @@ def get_tweets(username):
 
 @app.route('/')
 def home():
-    return jsonify({
-        'status': 'online',
-        'message': 'X Track Pro Backend is running!'
-    })
+    return jsonify({'status': 'online', 'message': 'X Track Pro Backend is running!'})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
