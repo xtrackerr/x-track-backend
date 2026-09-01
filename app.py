@@ -3,78 +3,90 @@ from flask_cors import CORS
 import requests
 from bs4 import BeautifulSoup
 import time
-import re
 
 app = Flask(__name__)
-CORS(app)
+CORS(app)  # Allow frontend to call this
 
-def get_tweets_from_x(username):
-    """Scrape tweets without API key using a simple method"""
+def get_tweets_from_nitter(username):
+    """
+    Fetch tweets using public Nitter instances.
+    Nitter is a privacy-friendly frontend for X/Twitter.
+    """
     tweets = []
     
-    try:
-        # Use the public mobile URL (easier to scrape)
-        url = f"https://x.com/{username}"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-        
-        response = requests.get(url, headers=headers, timeout=15)
-        
-        if response.status_code != 200:
-            return [{'error': f'Could not fetch tweets for @{username}'}]
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Find tweet articles
-        articles = soup.find_all('article')
-        
-        for article in articles[:5]:  # Get up to 5 tweets
-            try:
-                # Extract text
-                text_elem = article.find('div', {'data-testid': 'tweetText'})
-                if not text_elem:
-                    continue
-                text = text_elem.get_text(strip=True)
-                
-                # Extract time
-                time_elem = article.find('time')
-                created_at = time_elem.get('datetime') if time_elem else None
-                
-                # Extract stats
-                stats = article.find_all('span', {'data-testid': 'like'})
-                likes = 0
-                retweets = 0
-                
-                if stats and len(stats) > 0:
-                    try:
-                        likes = int(stats[0].get_text().replace(',', ''))
-                    except:
-                        likes = 0
-                
-                tweets.append({
-                    'id': f'tweet_{len(tweets)}',
-                    'text': text,
-                    'author_name': username,
-                    'author_username': username,
-                    'created_at': created_at or 'Just now',
-                    'likes': likes,
-                    'retweets': retweets
-                })
-            except Exception as e:
-                continue
-        
-        if not tweets:
-            return [{'error': f'No tweets found for @{username}'}]
+    # List of public Nitter instances (some may be down)
+    instances = [
+        f'https://nitter.net/{username}',
+        f'https://nitter.poast.org/{username}',
+        f'https://nitter.1d4.us/{username}',
+        f'https://nitter.esmailelbob.xyz/{username}',
+        f'https://nitter.kavin.rocks/{username}'
+    ]
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    
+    for instance_url in instances:
+        try:
+            response = requests.get(instance_url, headers=headers, timeout=10)
             
-        return tweets
+            if response.status_code != 200:
+                continue
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Nitter uses div.timeline-item for each tweet
+            timeline_items = soup.find_all('div', class_='timeline-item')
+            
+            if not timeline_items:
+                continue
+            
+            for item in timeline_items[:10]:  # Get up to 10 tweets
+                try:
+                    # Tweet content
+                    content_div = item.find('div', class_='tweet-content')
+                    if not content_div:
+                        continue
+                    text = content_div.get_text(strip=True)
+                    
+                    # Tweet time
+                    time_elem = item.find('span', class_='tweet-date')
+                    created_at = time_elem.get_text(strip=True) if time_elem else 'Just now'
+                    
+                    # Stats (likes, retweets) - Nitter may have these
+                    stats = item.find_all('span', class_='tweet-stat')
+                    likes = 0
+                    retweets = 0
+                    # We'll keep it simple, but you can parse stats if needed
+                    
+                    tweets.append({
+                        'id': f'tweet_{len(tweets)}',
+                        'text': text,
+                        'author_name': username,
+                        'author_username': username,
+                        'created_at': created_at,
+                        'likes': likes,
+                        'retweets': retweets
+                    })
+                except Exception:
+                    continue
+            
+            # If we got tweets, break out of the instance loop
+            if tweets:
+                break
         
-    except Exception as e:
-        return [{'error': f'Error: {str(e)}'}]
+        except Exception:
+            continue  # Try next instance
+    
+    if not tweets:
+        return [{'error': f'Could not fetch tweets for @{username}. All instances may be blocked.'}]
+    
+    return tweets
 
 @app.route('/tweets/<username>')
 def get_tweets(username):
-    result = get_tweets_from_x(username)
+    result = get_tweets_from_nitter(username)
     return jsonify(result)
 
 @app.route('/')
