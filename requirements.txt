@@ -1,5 +1,5 @@
 Flask==2.3.3
 flask-cors==4.0.0
 gunicorn==21.2.0
-twifork[impersonate]==2.3.5
 nest_asyncio==1.6.0
+git+https://github.com/PawiX25/twifork.git
