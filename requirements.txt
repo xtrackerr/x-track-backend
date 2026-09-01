@@ -1,3 +1,4 @@
 Flask==2.3.3
 flask-cors==4.0.0
-twifork==twifork
+gunicorn==21.2.0
+twifork==2.3.5
