@@ -7,12 +7,19 @@ app = Flask(__name__)
 CORS(app)
 
 def fetch_tweets_sync(username, limit=10):
-    """Synchronous wrapper that runs the async function."""
+    """Fetch tweets using twifork (no API key needed)."""
     try:
-        # Define the async function inside
         async def fetch():
             client = Client('en-US')
-            tweets = await client.get_user_tweets_by_username(username, limit)
+            
+            # 1. Get the user's numeric ID from their username
+            user = await client.get_user_by_screen_name(username)
+            user_id = user.id
+            
+            # 2. Get the user's tweets using their numeric ID
+            #    The second parameter can be 'Tweets' or 'Replies' or 'Media'
+            tweets = await client.get_user_tweets(user_id, 'Tweets', count=limit)
+            
             result = []
             for tweet in tweets:
                 result.append({
@@ -26,7 +33,7 @@ def fetch_tweets_sync(username, limit=10):
                 })
             return result
 
-        # Run the async function in a new event loop
+        # Run the async function
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
