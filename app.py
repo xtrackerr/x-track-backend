@@ -1,37 +1,49 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
-from twifork import Client
-import asyncio
+import requests
+import xml.etree.ElementTree as ET
 
 app = Flask(__name__)
 CORS(app)
 
-def get_tweets_sync(username, limit=10):
-    """Get tweets using twifork (no API key needed)"""
+def get_tweets_from_rss(username):
+    """Get tweets from RSS feed (no API key)"""
     try:
-        # Create client and get tweets
-        client = Client('en-US')
-        tweets = asyncio.run(client.get_user_tweets_by_username(username, limit))
+        # Use nitter RSS (if any instance is working)
+        # Or use a service like twiiit.com
+        url = f"https://nitter.net/{username}/rss"
         
-        result = []
-        for tweet in tweets:
-            result.append({
-                'id': tweet.id,
-                'text': tweet.text,
-                'author_name': tweet.user.name,
-                'author_username': tweet.user.screen_name,
-                'created_at': str(tweet.created_at),
-                'likes': tweet.favorite_count,
-                'retweets': tweet.retweet_count
+        response = requests.get(url, timeout=10)
+        if response.status_code != 200:
+            return [{'error': f'Could not fetch RSS for @{username}'}]
+        
+        root = ET.fromstring(response.content)
+        items = root.findall('.//item')
+        
+        tweets = []
+        for item in items[:10]:
+            title = item.find('title')
+            pub_date = item.find('pubDate')
+            link = item.find('link')
+            
+            tweets.append({
+                'id': link.text.split('/')[-1] if link else '',
+                'text': title.text if title is not None else '',
+                'author_name': username,
+                'author_username': username,
+                'created_at': pub_date.text if pub_date is not None else '',
+                'likes': 0,
+                'retweets': 0
             })
         
-        return result
+        return tweets if tweets else [{'error': f'No tweets found for @{username}'}]
+        
     except Exception as e:
         return [{'error': f'Error: {str(e)}'}]
 
 @app.route('/tweets/<username>')
 def get_tweets(username):
-    return jsonify(get_tweets_sync(username))
+    return jsonify(get_tweets_from_rss(username))
 
 @app.route('/')
 def home():
