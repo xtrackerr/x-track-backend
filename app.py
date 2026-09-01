@@ -1,53 +1,55 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
-import requests
-import xml.etree.ElementTree as ET
+from twikit import Client  # twifork still imports as twikit
+import asyncio
+import nest_asyncio
+
+# Apply nest_asyncio to allow nested event loops
+nest_asyncio.apply()
 
 app = Flask(__name__)
 CORS(app)
 
-def get_tweets_from_rss(username):
-    """Get tweets from RSS feed (no API key)"""
+def get_tweets_sync(username, limit=10):
+    """Get tweets using twifork (no API key needed)"""
     try:
-        # Use nitter RSS (if any instance is working)
-        # Or use a service like twiiit.com
-        url = f"https://nitter.net/{username}/rss"
+        # Create client with impersonation to bypass 403 blocks
+        client = Client('en-US')
         
-        response = requests.get(url, timeout=10)
-        if response.status_code != 200:
-            return [{'error': f'Could not fetch RSS for @{username}'}]
+        # Run the async function
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        tweets = loop.run_until_complete(
+            client.get_user_tweets_by_username(username, limit)
+        )
+        loop.close()
         
-        root = ET.fromstring(response.content)
-        items = root.findall('.//item')
-        
-        tweets = []
-        for item in items[:10]:
-            title = item.find('title')
-            pub_date = item.find('pubDate')
-            link = item.find('link')
-            
-            tweets.append({
-                'id': link.text.split('/')[-1] if link else '',
-                'text': title.text if title is not None else '',
-                'author_name': username,
-                'author_username': username,
-                'created_at': pub_date.text if pub_date is not None else '',
-                'likes': 0,
-                'retweets': 0
+        result = []
+        for tweet in tweets:
+            result.append({
+                'id': tweet.id,
+                'text': tweet.text,
+                'author_name': tweet.user.name,
+                'author_username': tweet.user.screen_name,
+                'created_at': str(tweet.created_at),
+                'likes': tweet.favorite_count,
+                'retweets': tweet.retweet_count
             })
         
-        return tweets if tweets else [{'error': f'No tweets found for @{username}'}]
-        
+        return result
     except Exception as e:
         return [{'error': f'Error: {str(e)}'}]
 
 @app.route('/tweets/<username>')
 def get_tweets(username):
-    return jsonify(get_tweets_from_rss(username))
+    return jsonify(get_tweets_sync(username))
 
 @app.route('/')
 def home():
-    return jsonify({'status': 'online', 'message': 'X Track Pro Backend is running!'})
+    return jsonify({
+        'status': 'online',
+        'message': 'X Track Pro Backend is running!'
+    })
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
