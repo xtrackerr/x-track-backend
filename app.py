@@ -1,42 +1,59 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
-import asyncio
+import subprocess
+import json
+import os
 
 app = Flask(__name__)
 CORS(app)
 
-async def fetch_tweets(username, limit=10):
+def fetch_tweets(username, limit=10):
+    """Use x-tweet-fetcher CLI to get tweets."""
     try:
-        from twikit import Client
+        # Run the xtf command
+        cmd = [
+            "xtf",
+            "--user", username,
+            "--limit", str(limit),
+            "--backend", "auto"  # Auto-fallback between backends
+        ]
         
-        # Initialize client - NO PROXY ARGUMENTS
-        client = Client('en-US')
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
         
-        # Get user
-        user = await client.get_user_by_screen_name(username)
+        if result.returncode != 0:
+            return [{'error': f'Command failed: {result.stderr}'}]
         
-        # Get tweets
-        tweets = await client.get_user_tweets(user.id, 'Tweets', count=limit)
+        # Parse the JSON output
+        tweets = json.loads(result.stdout)
         
-        result = []
+        # Format the response
+        formatted = []
         for tweet in tweets:
-            result.append({
-                'id': tweet.id,
-                'text': tweet.text,
-                'author_name': tweet.user.name,
-                'author_username': tweet.user.screen_name,
-                'created_at': str(tweet.created_at),
-                'likes': tweet.favorite_count,
-                'retweets': tweet.retweet_count
+            formatted.append({
+                'id': tweet.get('id', ''),
+                'text': tweet.get('text', ''),
+                'author_name': tweet.get('author', {}).get('name', username),
+                'author_username': tweet.get('author', {}).get('username', username),
+                'created_at': tweet.get('created_at', ''),
+                'likes': tweet.get('metrics', {}).get('likes', 0),
+                'retweets': tweet.get('metrics', {}).get('retweets', 0)
             })
-        return result
         
+        return formatted
+        
+    except subprocess.TimeoutExpired:
+        return [{'error': 'Request timed out'}]
     except Exception as e:
-        return [{'error': str(e)}]
+        return [{'error': f'Error: {str(e)}'}]
 
 @app.route('/tweets/<username>')
 def get_tweets(username):
-    return jsonify(asyncio.run(fetch_tweets(username)))
+    return jsonify(fetch_tweets(username))
 
 @app.route('/')
 def home():
