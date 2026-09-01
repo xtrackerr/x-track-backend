@@ -1,64 +1,83 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
-from twikit import Client  # twifork is a drop-in replacement
-import asyncio
+import feedparser
+import requests
+import time
 
 app = Flask(__name__)
 CORS(app)
 
-async def fetch_tweets_async(username, limit=10):
-    try:
-        # 1. Create a client
-        client = Client('en-US')
+# Public RSSHub instances (working as of Sept 2026)
+RSSHUB_INSTANCES = [
+    "https://rsshub.app",
+    "https://rsshub.rssforever.com",
+    "https://rsshub.feeded.xyz",
+    "https://rsshub.youxingk.com"
+]
 
-        # 2. The library handles guest authentication automatically.
-        #    You do not need to call a separate login or guest_auth method.
-        #    Simply making the first request (e.g., getting a user) will trigger it.
-
-        # 3. Get user by screen name
-        user = await client.get_user_by_screen_name(username)
-        user_id = user.id
-
-        # 4. Get tweets using the user's numeric ID
-        tweets = await client.get_user_tweets(user_id, 'Tweets', count=limit)
-
-        result = []
-        for tweet in tweets:
-            result.append({
-                'id': tweet.id,
-                'text': tweet.text,
-                'author_name': tweet.user.name,
-                'author_username': tweet.user.screen_name,
-                'created_at': str(tweet.created_at),
-                'likes': tweet.favorite_count,
-                'retweets': tweet.retweet_count
-            })
-        return result
-
-    except Exception as e:
-        # Return the error message as a JSON-friendly dict
-        return [{'error': f'Error: {str(e)}'}]
-
-def fetch_tweets_sync(username, limit=10):
-    """Synchronous wrapper for the async function."""
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(fetch_tweets_async(username, limit))
-        loop.close()
-        return result
-    except Exception as e:
-        return [{'error': f'Error: {str(e)}'}]
+def get_tweets_from_rss(username, limit=10):
+    """Fetch tweets using RSSHub public instances (no auth)."""
+    
+    for instance in RSSHUB_INSTANCES:
+        try:
+            feed_url = f"{instance}/twitter/user/{username}"
+            
+            # Add browser-like headers
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+            
+            response = requests.get(feed_url, headers=headers, timeout=12)
+            if response.status_code != 200:
+                continue
+            
+            feed = feedparser.parse(response.content)
+            
+            if not feed.entries:
+                continue
+            
+            tweets = []
+            for entry in feed.entries[:limit]:
+                # RSS title usually = "username: tweet text"
+                text = entry.title if hasattr(entry, 'title') else ''
+                if ': ' in text:
+                    text = text.split(': ', 1)[1]
+                
+                # Extract published date
+                published = entry.published if hasattr(entry, 'published') else ''
+                
+                # Extract tweet link and ID
+                link = entry.link if hasattr(entry, 'link') else ''
+                tweet_id = link.split('/')[-1] if link else ''
+                
+                tweets.append({
+                    'id': tweet_id,
+                    'text': text,
+                    'author_name': username,
+                    'author_username': username,
+                    'created_at': published,
+                    'likes': 0,
+                    'retweets': 0
+                })
+            
+            if tweets:
+                return tweets
+                
+        except Exception:
+            # Try next instance silently
+            continue
+    
+    return [{'error': f'Could not fetch tweets for @{username} from any RSSHub instance. Try again later.'}]
 
 @app.route('/tweets/<username>')
 def get_tweets(username):
-    return jsonify(fetch_tweets_sync(username))
+    return jsonify(get_tweets_from_rss(username))
 
 @app.route('/')
 def home():
     return jsonify({
         'status': 'online',
-        'message': 'X Track Pro Backend is running!'
+        'message': 'X Track Pro Backend running via RSSHub'
     })
 
 if __name__ == '__main__':
